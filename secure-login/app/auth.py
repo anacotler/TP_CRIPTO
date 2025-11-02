@@ -44,6 +44,13 @@ def current_session(request: Request, db: OrmSession) -> models.Session | None:
 
 @router.post("/register", status_code=204)
 def register(payload: RegisterIn, db: OrmSession = Depends(get_db)):
+    # Validar que la contraseña no sea similar al email
+    from app.schemas import validate_password_strength
+    try:
+        validate_password_strength(payload.password, payload.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     exists = db.scalar(select(models.User).where(models.User.email == payload.email.lower()))
     if exists:
         # no revelamos demasiado
@@ -139,6 +146,13 @@ def change_password(payload: ChangePasswordIn, request: Request, db: OrmSession 
     user = db.get(models.User, s.user_id)
     if not user or not verify_password(user.password_hash, payload.old_password):
         raise HTTPException(status_code=400, detail="Contraseña actual inválida")
+
+    # Validar que la nueva contraseña no sea similar al email
+    from app.schemas import validate_password_strength
+    try:
+        validate_password_strength(payload.new_password, user.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     user.password_hash = hash_password(payload.new_password)
     db.add(user)
