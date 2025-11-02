@@ -202,6 +202,40 @@
                 <p>✅ Sesión activa con cookie segura</p>
                 <p>✅ CSRF token configurado</p>
             </div>
+            
+            <!-- Cambiar contraseña -->
+            <div id="changePasswordSection" class="hidden" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 6px;">
+                <h3 style="color: #333; margin-bottom: 15px; font-size: 18px;">Cambiar Contraseña</h3>
+                <form id="changePasswordForm">
+                    <div class="form-group">
+                        <label for="oldPassword">Contraseña Actual</label>
+                        <div class="password-wrapper">
+                            <input type="password" id="oldPassword" required autocomplete="current-password">
+                            <button type="button" class="toggle-password" onclick="togglePassword('oldPassword', this)">
+                                👁️
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="newPassword">Nueva Contraseña</label>
+                        <div class="password-wrapper">
+                            <input type="password" id="newPassword" required autocomplete="new-password" minlength="12">
+                            <button type="button" class="toggle-password" onclick="togglePassword('newPassword', this)">
+                                👁️
+                            </button>
+                        </div>
+                        <small style="color: #666; font-size: 12px; margin-top: 5px; display: block;">
+                            • Mínimo 12 caracteres<br>
+                            • Al menos una letra, un número y un carácter especial<br>
+                            • No debe ser similar al email
+                        </small>
+                    </div>
+                    <button type="submit">Cambiar Contraseña</button>
+                    <button type="button" class="link-button" onclick="toggleChangePassword()" style="margin-top: 10px;">Cancelar</button>
+                </form>
+            </div>
+            
+            <button onclick="toggleChangePassword()" id="showChangePasswordBtn" style="margin-top: 10px;">Cambiar Contraseña</button>
             <button class="logout-btn" onclick="logout()">Cerrar Sesión</button>
         </div>
     </div>
@@ -345,6 +379,70 @@
             } catch (error) {
                 showMessage('dashboardMessage', 'Error de conexión', 'error');
             }
+        }
+
+        // Toggle change password form
+        function toggleChangePassword() {
+            const section = document.getElementById('changePasswordSection');
+            const btn = document.getElementById('showChangePasswordBtn');
+            
+            if (section.classList.contains('hidden')) {
+                section.classList.remove('hidden');
+                btn.classList.add('hidden');
+                // Limpiar campos
+                document.getElementById('oldPassword').value = '';
+                document.getElementById('newPassword').value = '';
+            } else {
+                section.classList.add('hidden');
+                btn.classList.remove('hidden');
+            }
+        }
+
+        // Change password
+        document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const oldPassword = document.getElementById('oldPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+
+            try {
+                const response = await fetch('/auth/change-password', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCookie('csrf') // Necesitamos enviar el token CSRF
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ 
+                        old_password: oldPassword, 
+                        new_password: newPassword 
+                    })
+                });
+
+                if (response.ok) {
+                    showMessage('dashboardMessage', '✅ Contraseña cambiada exitosamente', 'success');
+                    toggleChangePassword();
+                } else if (response.status === 422) {
+                    const data = await response.json();
+                    const errors = data.detail.map(err => err.msg).join(', ');
+                    showMessage('dashboardMessage', `Error de validación: ${errors}`, 'error');
+                } else if (response.status === 400) {
+                    const data = await response.json();
+                    showMessage('dashboardMessage', data.detail, 'error');
+                } else {
+                    const data = await response.json();
+                    showMessage('dashboardMessage', data.detail || 'Error al cambiar contraseña', 'error');
+                }
+            } catch (error) {
+                showMessage('dashboardMessage', 'Error de conexión: ' + error.message, 'error');
+            }
+        });
+
+        // Helper para leer cookies
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return null;
         }
 
         // Al cargar, verificar si hay sesión activa
