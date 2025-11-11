@@ -157,6 +157,7 @@
                     </div>
                 </div>
                 <button type="submit">Iniciar Sesión</button>
+                <button type="button" class="link-button" onclick="location.hash='#forgot'; handleRoute();">¿Olvidaste tu contraseña?</button>
             </form>
             <button class="link-button" onclick="showRegister()">¿No tenés cuenta? Registrate</button>
         </div>
@@ -238,7 +239,48 @@
             <button onclick="toggleChangePassword()" id="showChangePasswordBtn" style="margin-top: 10px;">Cambiar Contraseña</button>
             <button class="logout-btn" onclick="logout()">Cerrar Sesión</button>
         </div>
+
+        <!-- Forgot Password -->
+        <div id="forgotView" class="hidden">
+        <h1>Secure Login</h1>
+        <h2>Recuperar Contraseña</h2>
+        <div id="forgotMessage" class="message"></div>
+        <form id="forgotForm">
+            <div class="form-group">
+            <label for="forgotEmail">Email</label>
+            <input type="email" id="forgotEmail" required autocomplete="email">
+            </div>
+            <button type="submit">Enviar enlace</button>
+        </form>
+        <button class="link-button" type="button" onclick="location.hash=''; handleRoute();">Volver al inicio</button>
+        </div>
+
+        <!-- Reset Password (desde link con token) -->
+        <div id="resetView" class="hidden">
+        <h1>Secure Login</h1>
+        <h2>Definir Nueva Contraseña</h2>
+        <div id="resetMessage" class="message"></div>
+        <form id="resetForm">
+            <div class="form-group">
+            <label for="resetPassword">Nueva Contraseña</label>
+            <div class="password-wrapper">
+                <input type="password" id="resetPassword" required minlength="12" autocomplete="new-password">
+                <button type="button" class="toggle-password" onclick="togglePassword('resetPassword', this)">
+                👁️
+                </button>
+            </div>
+            <small style="color:#666;font-size:12px;display:block;margin-top:5px;">
+                • Mínimo 12 caracteres, con letra, número y símbolo. No similar al email.
+            </small>
+            </div>
+            <button type="submit">Guardar nueva contraseña</button>
+        </form>
+        <button class="link-button" type="button" onclick="location.hash=''; handleRoute();">Ir a iniciar sesión</button>
+        </div>
+
     </div>
+
+    
 
     <script>
         // Toggle password visibility
@@ -269,18 +311,24 @@
             document.getElementById('loginView').classList.remove('hidden');
             document.getElementById('registerView').classList.add('hidden');
             document.getElementById('loggedInView').classList.add('hidden');
+            document.getElementById('forgotView').classList.add('hidden');
+            document.getElementById('resetView').classList.add('hidden');
         }
 
         function showRegister() {
             document.getElementById('loginView').classList.add('hidden');
             document.getElementById('registerView').classList.remove('hidden');
             document.getElementById('loggedInView').classList.add('hidden');
+            document.getElementById('forgotView').classList.add('hidden');
+            document.getElementById('resetView').classList.add('hidden');
         }
 
         function showDashboard() {
             document.getElementById('loginView').classList.add('hidden');
             document.getElementById('registerView').classList.add('hidden');
             document.getElementById('loggedInView').classList.remove('hidden');
+            document.getElementById('forgotView').classList.add('hidden');
+            document.getElementById('resetView').classList.add('hidden');
         }
 
         // Register
@@ -355,10 +403,10 @@
                     document.getElementById('userId').textContent = data.user_id;
                     showDashboard();
                 } else {
-                    showLogin();
+                    handleRoute();
                 }
             } catch (error) {
-                showLogin();
+                handleRoute();
             }
         }
 
@@ -435,6 +483,96 @@
             } catch (error) {
                 showMessage('dashboardMessage', 'Error de conexión: ' + error.message, 'error');
             }
+        })
+        
+        
+        function showForgot() {
+            document.getElementById('loginView').classList.add('hidden');
+            document.getElementById('registerView').classList.add('hidden');
+            document.getElementById('loggedInView').classList.add('hidden');
+            document.getElementById('forgotView').classList.remove('hidden');
+            document.getElementById('resetView').classList.add('hidden');
+        }
+        function showReset() {
+            document.getElementById('loginView').classList.add('hidden');
+            document.getElementById('registerView').classList.add('hidden');
+            document.getElementById('loggedInView').classList.add('hidden');
+            document.getElementById('forgotView').classList.add('hidden');
+            document.getElementById('resetView').classList.remove('hidden');
+        }
+
+        // --- routing por hash ---
+        function getResetTokenFromHash() {
+            const h = location.hash || "";
+            if (h.startsWith('#reset')) {
+            const i = h.indexOf('?');
+            const qs = i >= 0 ? h.slice(i + 1) : '';
+            const p = new URLSearchParams(qs);
+            return p.get('token');
+            }
+            return null;
+        }
+
+        function handleRoute() {
+            const token = getResetTokenFromHash();
+            if (token) { showReset(); return; }
+            if (location.hash === '#forgot') { showForgot(); return; }
+            showLogin();
+        }
+
+        window.addEventListener('hashchange', handleRoute);
+
+        // --- submit del Reset ---
+        document.getElementById('resetForm')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const token = getResetTokenFromHash();
+            const newPassword = document.getElementById('resetPassword').value;
+
+            if (!token) {
+            showMessage('resetMessage', 'Falta token de reseteo', 'error');
+            return;
+            }
+            try {
+            const resp = await fetch('/auth/reset-password', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ token, new_password: newPassword })
+            });
+            if (resp.ok) {
+                showMessage('resetMessage', '✅ Contraseña actualizada. Iniciá sesión.', 'success');
+                setTimeout(() => { location.hash=''; showLogin(); }, 1200);
+            } else if (resp.status === 422) {
+                const data = await resp.json();
+                const errors = data.detail.map(e => e.msg).join(', ');
+                showMessage('resetMessage', `Error de validación: ${errors}`, 'error');
+            } else {
+                const data = await resp.json();
+                showMessage('resetMessage', data.detail || 'Token inválido/expirado', 'error');
+            }
+            } catch {
+            showMessage('resetMessage', 'Error de conexión', 'error');
+            }
+        })
+
+        // Forgot submit
+        document.getElementById('forgotForm')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('forgotEmail').value;
+            try {
+            const resp = await fetch('/auth/forgot-password', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ email })
+            });
+            if (resp.ok) {
+                showMessage('forgotMessage', '✅ Si el email existe, te enviamos un enlace de reseteo.', 'success');
+            } else {
+                const data = await resp.json();
+                showMessage('forgotMessage', data.detail || 'Error al solicitar reseteo', 'error');
+            }
+            } catch (err) {
+            showMessage('forgotMessage', 'Error de conexión', 'error');
+            }
         });
 
         // Helper para leer cookies
@@ -446,6 +584,7 @@
         }
 
         // Al cargar, verificar si hay sesión activa
+        handleRoute();
         checkSession();
     </script>
 </body>

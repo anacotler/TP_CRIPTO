@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from sqlalchemy.orm import Session as OrmSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, and_
 from datetime import datetime, timedelta
 from app.db import get_db
 from app import models
-from app.schemas import RegisterIn, LoginIn, ChangePasswordIn
+from app.schemas import RegisterIn, LoginIn, ChangePasswordIn, ForgotPasswordIn, ResetPasswordIn, validate_password_strength
 from app.security import hash_password, verify_password, random_token, ua_fingerprint, hmac_sha256_hex
 from app.csrf import make_csrf_token, validate_csrf
 from app.config import settings
+from app.utils_email_tokens import generate_email_token, send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -174,3 +175,88 @@ def change_password(payload: ChangePasswordIn, request: Request, db: OrmSession 
     resp = Response(status_code=204)
     set_cookie_csrf(resp, make_csrf_token(s.csrf_secret))
     return resp
+
+@router.post("/forgot-password", status_code=204)
+def forgot_password(payload: ForgotPasswordIn, request: Request, db: OrmSession = Depends(get_db)):
+    # Respuesta uniforme para evitar enumeración
+    email = payload.email.lower()
+    user: models.User | None = db.scalar(select(models.User).where(models.User.email == email))
+    if not user:
+        return Response(status_code=204)
+
+    # (opcional) rate-limit simple por usuario: 1 cada 5 min
+    five_min_ago = datetime.utcnow() - timedelta(minutes=5)
+    recent = db.scalar(
+        select(models.PasswordResetToken)
+        .where(
+            models.PasswordResetToken.user_id == user.id,
+            models.PasswordResetToken.created_at >= five_min_ago
+        )
+    )
+    if recent:
+        # igual respondemos 204 sin revelar nada
+        return Response(status_code=204)
+
+    # generar token y guardar sólo el hash
+    token, token_hash = generate_email_token()
+    t = models.PasswordResetToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=datetime.utcnow() + timedelta(seconds=settings.PASSWORD_RESET_TOKEN_TTL_SECONDS),
+        ip=request.client.host if request.client else None,
+        ua_hash=ua_fingerprint(request.headers.get("user-agent")),
+    )
+    db.add(t)
+    db.add(models.AuditEvent(user_id=user.id, event="password_reset_requested", ip=t.ip, ua_hash=t.ua_hash))
+    db.commit()
+
+    # armar link al front (index.html escucha #reset?token=...)
+    reset_link = f"{settings.FRONTEND_BASE_URL}/#reset?token={token}"
+    send_password_reset_email(email, reset_link)
+
+    return Response(status_code=204)
+
+
+@router.post("/reset-password", status_code=204)
+def reset_password(payload: ResetPasswordIn, request: Request, db: OrmSession = Depends(get_db)):
+    token_hash = hmac_sha256_hex(payload.token)
+
+    # Buscar token válido (no usado, no vencido)
+    now = datetime.utcnow()
+    prt: models.PasswordResetToken | None = db.scalar(
+        select(models.PasswordResetToken).where(
+            and_(
+                models.PasswordResetToken.token_hash == token_hash,
+                models.PasswordResetToken.used_at.is_(None),
+                models.PasswordResetToken.expires_at > now,
+            )
+        )
+    )
+    if not prt:
+        raise HTTPException(status_code=400, detail="Token inválido o expirado")
+
+    user = db.get(models.User, prt.user_id)
+    if not user:
+        raise HTTPException(status_code=400, detail="Token inválido")
+
+    # Validar fuerza y no-similitud con email
+    try:
+        validate_password_strength(payload.new_password, user.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Setear nueva password
+    user.password_hash = hash_password(payload.new_password)
+    db.add(user)
+
+    # Marcar token como usado (single-use)
+    prt.used_at = now
+    db.add(prt)
+
+    # Logout global (revoca TODAS las sesiones del usuario)
+    db.query(models.Session).filter(models.Session.user_id == user.id).update({models.Session.revoked: True})
+
+    db.add(models.AuditEvent(user_id=user.id, event="password_reset_success", ip=prt.ip, ua_hash=prt.ua_hash))
+    db.commit()
+
+    return Response(status_code=204)

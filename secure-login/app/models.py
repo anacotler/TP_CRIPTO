@@ -41,3 +41,14 @@ class AuditEvent(Base):
     ua_hash = Column(String, nullable=True)
     meta = Column(String, nullable=True)  # JSON string si querés
     created_at = Column(DateTime, server_default=func.now())
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    id = Column(String, primary_key=True, default=uuid_str)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    ip = Column(String, nullable=True)
+    ua_hash = Column(String, nullable=True)

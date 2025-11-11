@@ -87,3 +87,22 @@ class ChangePasswordIn(BaseModel):
         if not re.search(r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/;~`]', v):
             raise ValueError("debe contener al menos un carácter especial (!@#$%^&*...)")
         return v
+    
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+class ResetPasswordIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=12)
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_strength(cls, v: str) -> str:
+        # mismas reglas básicas que usás en otros schemas
+        import re
+        if len(v) < 12: raise ValueError("debe tener al menos 12 caracteres")
+        if not re.search(r'[a-zA-Z]', v): raise ValueError("debe contener al menos una letra")
+        if not re.search(r'\d', v): raise ValueError("debe contener al menos un número")
+        if not re.search(r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\/;~`]', v): 
+            raise ValueError("debe contener al menos un carácter especial (!@#$%^&*...)")
+        return v
