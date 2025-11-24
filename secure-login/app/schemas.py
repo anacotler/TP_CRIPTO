@@ -106,3 +106,24 @@ class ResetPasswordIn(BaseModel):
         if not re.search(r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\/;~`]', v): 
             raise ValueError("debe contener al menos un carácter especial (!@#$%^&*...)")
         return v
+
+# Schemas para 2FA/MFA
+class VerifyTotpCodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=6, description="Código TOTP de 6 dígitos")
+    
+    @field_validator('code')
+    @classmethod
+    def validate_code(cls, v: str) -> str:
+        if not v.isdigit():
+            raise ValueError("El código debe contener solo números")
+        return v
+
+class EnableTotpIn(BaseModel):
+    code: str = Field(min_length=6, max_length=6, description="Código TOTP de 6 dígitos para verificar")
+    
+    @field_validator('code')
+    @classmethod
+    def validate_code(cls, v: str) -> str:
+        if not v.isdigit():
+            raise ValueError("El código debe contener solo números")
+        return v

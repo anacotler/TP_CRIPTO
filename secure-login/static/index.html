@@ -162,6 +162,22 @@
             <button class="link-button" onclick="showRegister()">¿No tenés cuenta? Registrate</button>
         </div>
 
+        <!-- 2FA Verification View (during login) -->
+        <div id="verify2faView" class="hidden">
+            <h1>Secure Login</h1>
+            <h2>Verificación 2FA</h2>
+            <div id="verify2faMessage" class="message"></div>
+            <p style="color: #666; margin-bottom: 20px;">Ingresá el código de 6 dígitos de tu aplicación autenticadora:</p>
+            <form id="verify2faForm">
+                <div class="form-group">
+                    <label for="totpCode">Código 2FA</label>
+                    <input type="text" id="totpCode" required maxlength="6" pattern="[0-9]{6}" placeholder="000000" style="text-align: center; font-size: 24px; letter-spacing: 8px;">
+                </div>
+                <button type="submit">Verificar</button>
+                <button type="button" class="link-button" onclick="showLogin()">Cancelar</button>
+            </form>
+        </div>
+
         <!-- Register Form -->
         <div id="registerView" class="hidden">
             <h1>Secure Login</h1>
@@ -202,6 +218,48 @@
                 <p><strong>User ID:</strong> <span id="userId"></span></p>
                 <p>✅ Sesión activa con cookie segura</p>
                 <p>✅ CSRF token configurado</p>
+                <p><strong>2FA:</strong> <span id="twoFactorStatus">Cargando...</span></p>
+            </div>
+            
+            <!-- 2FA Management Section -->
+            <div id="twoFactorSection" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 6px;">
+                <h3 style="color: #333; margin-bottom: 15px; font-size: 18px;">Autenticación de Dos Factores (2FA)</h3>
+                <div id="twoFactorContent">
+                    <p id="twoFactorStatusText" style="margin-bottom: 15px;"></p>
+                    <div id="enable2faSection" class="hidden">
+                        <p style="color: #666; margin-bottom: 15px;">Escaneá este código QR con tu aplicación autenticadora (Google Authenticator, Authy, etc.):</p>
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <div id="qrCodeContainer" style="display: inline-block; padding: 15px; background: white; border: 2px solid #ddd; border-radius: 6px;">
+                                <img id="qrCodeImage" src="" alt="QR Code" style="display: block; width: 250px; height: 250px; object-fit: contain;">
+                            </div>
+                            <div id="qrCodeError" style="display: none; color: #c33; margin-top: 10px;">
+                                ⚠️ Error al cargar el código QR. Usá el código manual de arriba.
+                            </div>
+                        </div>
+                        <p style="color: #666; font-size: 12px; margin-bottom: 15px;">O ingresá manualmente este código: <strong id="manualSecret"></strong></p>
+                        <form id="enable2faVerifyForm">
+                            <div class="form-group">
+                                <label for="enableTotpCode">Código de verificación</label>
+                                <input type="text" id="enableTotpCode" required maxlength="6" pattern="[0-9]{6}" placeholder="000000" style="text-align: center; font-size: 20px; letter-spacing: 4px;">
+                            </div>
+                            <button type="submit">Habilitar 2FA</button>
+                            <button type="button" class="link-button" onclick="cancelEnable2fa()">Cancelar</button>
+                        </form>
+                    </div>
+                    <div id="disable2faSection" class="hidden">
+                        <form id="disable2faForm">
+                            <div class="form-group">
+                                <label for="disableTotpCode">Ingresá tu código 2FA para deshabilitar:</label>
+                                <input type="text" id="disableTotpCode" required maxlength="6" pattern="[0-9]{6}" placeholder="000000" style="text-align: center; font-size: 20px; letter-spacing: 4px;">
+                            </div>
+                            <button type="submit" style="background: #dc3545;">Deshabilitar 2FA</button>
+                        </form>
+                    </div>
+                    <div id="twoFactorButtons">
+                        <button id="enable2faBtn" onclick="startEnable2fa()" class="hidden" style="margin-top: 10px;">Habilitar 2FA</button>
+                        <button id="disable2faBtn" onclick="showDisable2fa()" class="hidden" style="margin-top: 10px; background: #dc3545;">Deshabilitar 2FA</button>
+                    </div>
+                </div>
             </div>
             
             <!-- Cambiar contraseña -->
@@ -313,6 +371,16 @@
             document.getElementById('loggedInView').classList.add('hidden');
             document.getElementById('forgotView').classList.add('hidden');
             document.getElementById('resetView').classList.add('hidden');
+            document.getElementById('verify2faView').classList.add('hidden');
+        }
+        
+        function showVerify2fa() {
+            document.getElementById('loginView').classList.add('hidden');
+            document.getElementById('registerView').classList.add('hidden');
+            document.getElementById('loggedInView').classList.add('hidden');
+            document.getElementById('forgotView').classList.add('hidden');
+            document.getElementById('resetView').classList.add('hidden');
+            document.getElementById('verify2faView').classList.remove('hidden');
         }
 
         function showRegister() {
@@ -321,6 +389,7 @@
             document.getElementById('loggedInView').classList.add('hidden');
             document.getElementById('forgotView').classList.add('hidden');
             document.getElementById('resetView').classList.add('hidden');
+            document.getElementById('verify2faView').classList.add('hidden');
         }
 
         function showDashboard() {
@@ -329,6 +398,8 @@
             document.getElementById('loggedInView').classList.remove('hidden');
             document.getElementById('forgotView').classList.add('hidden');
             document.getElementById('resetView').classList.add('hidden');
+            document.getElementById('verify2faView').classList.add('hidden');
+            load2faStatus();
         }
 
         // Register
@@ -365,6 +436,9 @@
             }
         });
 
+        // Variable global para almacenar temp_token durante login 2FA
+        let pending2faToken = null;
+
         // Login
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -379,8 +453,19 @@
                     body: JSON.stringify({ email, password })
                 });
 
-                if (response.ok) {
-                    // Login exitoso, obtener info del usuario
+                if (response.status === 200) {
+                    const data = await response.json();
+                    if (data.requires_2fa) {
+                        // Usuario tiene 2FA habilitado, necesita código
+                        pending2faToken = data.temp_token;
+                        showVerify2fa();
+                        document.getElementById('totpCode').focus();
+                    } else {
+                        // Login exitoso sin 2FA
+                        checkSession();
+                    }
+                } else if (response.status === 204) {
+                    // Login exitoso sin 2FA (respuesta vacía)
                     checkSession();
                 } else {
                     const data = await response.json();
@@ -388,6 +473,53 @@
                 }
             } catch (error) {
                 showMessage('loginMessage', 'Error de conexión', 'error');
+            }
+        });
+
+        // Validación de código TOTP (solo números)
+        document.getElementById('totpCode')?.addEventListener('input', function(e) {
+            this.value = this.value.replace(/[^0-9]/g, '');
+        });
+        document.getElementById('enableTotpCode')?.addEventListener('input', function(e) {
+            this.value = this.value.replace(/[^0-9]/g, '');
+        });
+        document.getElementById('disableTotpCode')?.addEventListener('input', function(e) {
+            this.value = this.value.replace(/[^0-9]/g, '');
+        });
+
+        // Verificar código 2FA durante login
+        document.getElementById('verify2faForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const code = document.getElementById('totpCode').value.replace(/[^0-9]/g, '');
+
+            if (code.length !== 6) {
+                showMessage('verify2faMessage', 'El código debe tener 6 dígitos', 'error');
+                return;
+            }
+
+            if (!pending2faToken) {
+                showMessage('verify2faMessage', 'Error: token temporal no encontrado', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/auth/verify-2fa-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ temp_token: pending2faToken, code: code })
+                });
+
+                if (response.ok) {
+                    pending2faToken = null;
+                    checkSession();
+                } else {
+                    const data = await response.json();
+                    showMessage('verify2faMessage', data.detail || 'Código 2FA inválido', 'error');
+                    document.getElementById('totpCode').value = '';
+                }
+            } catch (error) {
+                showMessage('verify2faMessage', 'Error de conexión', 'error');
             }
         });
 
@@ -582,6 +714,190 @@
             if (parts.length === 2) return parts.pop().split(';').shift();
             return null;
         }
+
+        // Funciones para gestionar 2FA
+        async function load2faStatus() {
+            try {
+                const response = await fetch('/auth/2fa/status', {
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    const statusEl = document.getElementById('twoFactorStatus');
+                    const statusTextEl = document.getElementById('twoFactorStatusText');
+                    const enableBtn = document.getElementById('enable2faBtn');
+                    const disableBtn = document.getElementById('disable2faBtn');
+                    
+                    if (data.enabled) {
+                        statusEl.textContent = '✅ Habilitado';
+                        statusTextEl.textContent = 'La autenticación de dos factores está habilitada.';
+                        enableBtn.classList.add('hidden');
+                        disableBtn.classList.remove('hidden');
+                        document.getElementById('enable2faSection').classList.add('hidden');
+                        document.getElementById('disable2faSection').classList.add('hidden');
+                    } else {
+                        statusEl.textContent = '❌ Deshabilitado';
+                        statusTextEl.textContent = 'La autenticación de dos factores no está habilitada.';
+                        enableBtn.classList.remove('hidden');
+                        disableBtn.classList.add('hidden');
+                        document.getElementById('enable2faSection').classList.add('hidden');
+                        document.getElementById('disable2faSection').classList.add('hidden');
+                    }
+                }
+            } catch (error) {
+                console.error('Error cargando estado 2FA:', error);
+            }
+        }
+
+        async function startEnable2fa() {
+            try {
+                const response = await fetch('/auth/2fa/enable', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Respuesta 2FA enable:', data); // Debug
+                    console.log('QR code recibido:', data.qr_code ? data.qr_code.substring(0, 50) + '...' : 'null');
+                    
+                    const qrImage = document.getElementById('qrCodeImage');
+                    const qrError = document.getElementById('qrCodeError');
+                    
+                    // Mostrar el código secreto siempre
+                    if (data.secret) {
+                        document.getElementById('manualSecret').textContent = data.secret;
+                    }
+                    
+                    // Manejar el QR code
+                    if (data.qr_code && typeof data.qr_code === 'string' && data.qr_code.startsWith('data:image')) {
+                        console.log('Intentando cargar QR code...');
+                        qrImage.style.display = 'block';
+                        qrError.style.display = 'none';
+                        
+                        qrImage.onerror = function() {
+                            console.error('Error cargando QR code - evento onerror disparado');
+                            qrError.style.display = 'block';
+                            qrImage.style.display = 'none';
+                        };
+                        
+                        qrImage.onload = function() {
+                            console.log('✅ QR code cargado exitosamente');
+                            qrImage.style.display = 'block';
+                            qrError.style.display = 'none';
+                        };
+                        
+                        // Establecer el src después de configurar los handlers
+                        qrImage.src = data.qr_code;
+                    } else {
+                        console.warn('No se recibió qr_code válido. Tipo:', typeof data.qr_code, 'Valor:', data.qr_code);
+                        qrError.style.display = 'block';
+                        qrImage.style.display = 'none';
+                        if (!data.qr_code) {
+                            showMessage('dashboardMessage', '⚠️ El código QR no se pudo generar, pero podés usar el código manual', 'error');
+                        }
+                    }
+                    
+                    if (data.secret) {
+                        document.getElementById('manualSecret').textContent = data.secret;
+                    }
+                    
+                    document.getElementById('enable2faSection').classList.remove('hidden');
+                    document.getElementById('enable2faBtn').classList.add('hidden');
+                    document.getElementById('disable2faBtn').classList.add('hidden');
+                } else {
+                    const data = await response.json();
+                    console.error('Error en respuesta:', data);
+                    showMessage('dashboardMessage', data.detail || 'Error al iniciar habilitación 2FA', 'error');
+                }
+            } catch (error) {
+                console.error('Error de conexión:', error);
+                showMessage('dashboardMessage', 'Error de conexión: ' + error.message, 'error');
+            }
+        }
+
+        function cancelEnable2fa() {
+            document.getElementById('enable2faSection').classList.add('hidden');
+            document.getElementById('enableTotpCode').value = '';
+            load2faStatus();
+        }
+
+        document.getElementById('enable2faVerifyForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const code = document.getElementById('enableTotpCode').value.replace(/[^0-9]/g, '');
+
+            if (code.length !== 6) {
+                showMessage('dashboardMessage', 'El código debe tener 6 dígitos', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/auth/2fa/enable/verify', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCookie('csrf')
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ code: code })
+                });
+
+                if (response.ok) {
+                    showMessage('dashboardMessage', '✅ 2FA habilitado exitosamente', 'success');
+                    document.getElementById('enable2faSection').classList.add('hidden');
+                    document.getElementById('enableTotpCode').value = '';
+                    load2faStatus();
+                } else {
+                    const data = await response.json();
+                    showMessage('dashboardMessage', data.detail || 'Código inválido', 'error');
+                    document.getElementById('enableTotpCode').value = '';
+                }
+            } catch (error) {
+                showMessage('dashboardMessage', 'Error de conexión', 'error');
+            }
+        });
+
+        function showDisable2fa() {
+            document.getElementById('disable2faSection').classList.remove('hidden');
+            document.getElementById('enable2faBtn').classList.add('hidden');
+            document.getElementById('disable2faBtn').classList.add('hidden');
+        }
+
+        document.getElementById('disable2faForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const code = document.getElementById('disableTotpCode').value.replace(/[^0-9]/g, '');
+
+            if (code.length !== 6) {
+                showMessage('dashboardMessage', 'El código debe tener 6 dígitos', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/auth/2fa/disable', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCookie('csrf')
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ code: code })
+                });
+
+                if (response.ok) {
+                    showMessage('dashboardMessage', '✅ 2FA deshabilitado exitosamente. Tu sesión ha sido cerrada.', 'success');
+                    document.getElementById('disable2faSection').classList.add('hidden');
+                    document.getElementById('disableTotpCode').value = '';
+                    setTimeout(() => {
+                        showLogin();
+                    }, 2000);
+                } else {
+                    const data = await response.json();
+                    showMessage('dashboardMessage', data.detail || 'Código inválido', 'error');
+                    document.getElementById('disableTotpCode').value = '';
+                }
+            } catch (error) {
+                showMessage('dashboardMessage', 'Error de conexión', 'error');
+            }
+        });
 
         // Al cargar, verificar si hay sesión activa
         handleRoute();

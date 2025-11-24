@@ -17,6 +17,9 @@ class User(Base):
     email_verified_at = Column(DateTime, nullable=True)
     failed_logins = Column(Integer, default=0)
     lock_until = Column(DateTime, nullable=True)
+    # 2FA/MFA fields
+    totp_secret = Column(String, nullable=True)  # Secreto TOTP encriptado o en texto plano (según tu preferencia)
+    totp_enabled = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -50,5 +53,15 @@ class PasswordResetToken(Base):
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
+    ip = Column(String, nullable=True)
+    ua_hash = Column(String, nullable=True)
+
+class PendingTotpLogin(Base):
+    __tablename__ = "pending_totp_logins"
+    id = Column(String, primary_key=True, default=uuid_str)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=False)
     ip = Column(String, nullable=True)
     ua_hash = Column(String, nullable=True)
